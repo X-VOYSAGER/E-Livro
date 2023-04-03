@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Component } from "react";
 import TabNavigator from "./components/TabNavigator";
 import { Rajdhani_600SemiBold } from "@expo-google-fonts/rajdhani";
 import * as Font from "expo-font";
