@@ -6,12 +6,16 @@ import {
   TouchableOpacity,
   Text,
   ImageBackground,
-  Image
+  Image,
+  Platform,
+  ToastAndroid,
+  Alert,
+  KeyboardAvoidingView
 } from "react-native";
 import * as Permissions from "expo-permissions";
 import { BarCodeScanner } from "expo-barcode-scanner";
 import db from "../config"
-
+import firebase from "firebase";
 
 const bgImage = require("../assets/background2.png");
 const appIcon = require("../assets/appIcon.png");
@@ -25,7 +29,9 @@ export default class TransactionScreen extends Component {
       studentId: "",
       domState: "normal",
       hasCameraPermissions: null,
-      scanned: false
+      scanned: false,
+      bookName: "",
+      studentName: ""
     };
   }
 
@@ -60,19 +66,130 @@ export default class TransactionScreen extends Component {
     }
   };
 
-handleTransaction = () => {
-var {bookId} = this.state
-db.collection("books")
-.doc(bookId)
-.get()
-.then(doc => {
-  console.log(doc.data())
-})
+  handleTransaction = async () => {
+    var { bookId, studentId } = this.state
+    await this.getBookDetails(bookId)
+    await this.getStudentDetails(studentId)
+
+    db.collection("books")
+      .doc(bookId)
+      .get()
+      .then(doc => {
+        var book = doc.data()
+        if (book.is_book_available) {
+          var { bookName, studentName } = this.state
+          this.initiateBookIssue(bookId, studentId, bookName, studentName)
+          if (Platform.OS == "android") {
+            ToastAndroid.show("Livro Entregue ao Aluno!", ToastAndroid.SHORT)
+          }
+          else{
+            Alert.alert("Livro Entregue ao Aluno!")
+          }
+        }
+        else {
+          var { bookName, studentName } = this.state
+          this.initiateBookReturn(bookId, studentId, bookName, studentName)
+       
+          if (Platform.OS == "android") {
+            ToastAndroid.show("Livro Devolvido!", ToastAndroid.SHORT)
+          }
+          else{
+            Alert.alert("Livro Devolvido!")
+          }
+        }
+
+      })
 
 
-}
+  }
 
+  getBookDetails = (bookId) => {
+    bookId = bookId.trim()
+    db.collection("books")
+      .where("book_id", "==", bookId)
+      .get()
+      .then(snapshot => {
+        snapshot.docs.map(doc => {
+          this.setState({ bookName: doc.data().book_name })
+        })
 
+      })
+  }
+
+  getStudentDetails = (studentId) => {
+    studentId = studentId.trim()
+    db.collection("students")
+      .where("student_id", "==", studentId)
+      .get()
+      .then(snapshot => {
+        snapshot.docs.map(doc => {
+          this.setState({ studentName: doc.data().student_name })
+        })
+
+      })
+  }
+
+  initiateBookIssue = async (bookId, studentId, bookName, studentName) => {
+    //adicionar transação no banco de dados
+    db.collection("transactions").add({
+      student_id: studentId,
+      student_name: studentName,
+      book_id: bookId,
+      book_name: bookName,
+      date: firebase.firestore.Timestamp.now().toDate(),
+      transaction_type: "issue"
+    })
+    //alterar status do livro
+    db.collection("books")
+      .doc(bookId)
+      .update({
+        is_book_available: false
+      })
+
+    //alterar número de livros retirados pelo aluno
+    db.collection("students")
+      .doc(studentId)
+      .update({
+        number_of_books_issued: firebase.firestore.FieldValue.increment(1)
+      })
+
+    //atualizar os estados locais
+    this.setState({
+      bookId: "",
+      studentId: "",
+    })
+  }
+
+  initiateBookReturn = async (bookId, studentId, bookName, studentName) => {
+    //adicionar transação no banco de dados
+    db.collection("transactions").add({
+      student_id: studentId,
+      student_name: studentName,
+      book_id: bookId,
+      book_name: bookName,
+      date: firebase.firestore.Timestamp.now().toDate(),
+      transaction_type: "return"
+    })
+    //alterar status do livro
+    db.collection("books")
+      .doc(bookId)
+      .update({
+        is_book_available: true
+      })
+
+    //alterar número de livros retirados pelo aluno
+    db.collection("students")
+      .doc(studentId)
+      .update({
+        number_of_books_issued: firebase.firestore.FieldValue.increment(-1)
+      })
+
+    //atualizar os estados locais
+    this.setState({
+      bookId: "",
+      studentId: "",
+    })
+  }
 
   render() {
     const { bookId, studentId, domState, scanned } = this.state;
@@ -85,7 +202,7 @@ db.collection("books")
       );
     }
     return (
-      <View style={styles.container}>
+      <KeyboardAvoidingView behavior="padding" style={styles.container}>
         <ImageBackground source={bgImage} style={styles.bgImage}>
           <View style={styles.upperContainer}>
             <Image source={appIcon} style={styles.appIcon} />
@@ -98,6 +215,9 @@ db.collection("books")
                 placeholder={"ID do Livro"}
                 placeholderTextColor={"#FFFFFF"}
                 value={bookId}
+                onChangeText = {text => {
+                  this.setState({bookId: text})
+                }}
               />
               <TouchableOpacity
                 style={styles.scanbutton}
@@ -112,7 +232,10 @@ db.collection("books")
                 placeholder={"ID do Estudante"}
                 placeholderTextColor={"#FFFFFF"}
                 value={studentId}
-              />
+                onChangeText = {text => {
+                  this.setState({studentId: text})
+                }}
+             />
               <TouchableOpacity
                 style={styles.scanbutton}
                 onPress={() => this.getCameraPermissions("studentId")}
@@ -120,14 +243,14 @@ db.collection("books")
                 <Text style={styles.scanbuttonText}>Digitalizar</Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style = {styles.button} onPress = {this.handleTransaction}>
-                <Text style = {styles.buttonText}>
-                  enviar
-                </Text>
-              </TouchableOpacity>      
+            <TouchableOpacity style={styles.button} onPress={this.handleTransaction}>
+              <Text style={styles.buttonText}>
+                enviar
+              </Text>
+            </TouchableOpacity>
           </View>
         </ImageBackground>
-      </View>
+      </KeyboardAvoidingView>
     );
   }
 }
