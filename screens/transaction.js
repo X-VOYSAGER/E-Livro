@@ -68,43 +68,55 @@ export default class TransactionScreen extends Component {
 
   handleTransaction = async () => {
     var { bookId, studentId } = this.state
+    bookId = bookId.toLowerCase().trim()
+    studentId = studentId.toLowerCase().trim()
     await this.getBookDetails(bookId)
     await this.getStudentDetails(studentId)
+    var transactionType = await this.checkBookAvailability(bookId)
+    var { bookName, studentName } = this.state
 
-    db.collection("books")
-      .doc(bookId)
-      .get()
-      .then(doc => {
-        var book = doc.data()
-        if (book.is_book_available) {
-          var { bookName, studentName } = this.state
-          this.initiateBookIssue(bookId, studentId, bookName, studentName)
-          if (Platform.OS == "android") {
-            ToastAndroid.show("Livro Entregue ao Aluno!", ToastAndroid.SHORT)
-          }
-          else{
-            Alert.alert("Livro Entregue ao Aluno!")
-          }
+    if (!transactionType) {
+      if (Platform.OS == "android") {
+        ToastAndroid.show("Ei cara esse livro não existe!", ToastAndroid.SHORT)
+      }
+      else {
+        Alert.alert("Ei cara esse livro não existe!")
+      }
+      this.setState({
+        bookId: "",
+        studentId: ""
+      })
+    } else if (transactionType == "issue") {
+      var isEligible = await checkStudentEligibilityForBookIssue(studentId)
+      if (isEligible) {
+        this.initiateBookIssue(bookId, studentId, bookName, studentName)
+        if (Platform.OS == "android") {
+          ToastAndroid.show("Livro Entregue ao Aluno!", ToastAndroid.SHORT)
         }
         else {
-          var { bookName, studentName } = this.state
-          this.initiateBookReturn(bookId, studentId, bookName, studentName)
-       
-          if (Platform.OS == "android") {
-            ToastAndroid.show("Livro Devolvido!", ToastAndroid.SHORT)
-          }
-          else{
-            Alert.alert("Livro Devolvido!")
-          }
+          Alert.alert("Livro Entregue ao Aluno!")
         }
+      }
 
-      })
+    } else if (transactionType == "return") {
+      var isEligible = await checkStudentEligibilityForBookReturn(bookId, studentId)
+      if (isEligible) {
 
-
+        this.initiateBookReturn(bookId, studentId, bookName, studentName)
+        if (Platform.OS == "android") {
+          ToastAndroid.show("Livro Devolvido!", ToastAndroid.SHORT)
+        }
+        else {
+          Alert.alert("Livro Devolvido!")
+        }
+      }
+    }
   }
 
+
+
+
   getBookDetails = (bookId) => {
-    bookId = bookId.trim()
     db.collection("books")
       .where("book_id", "==", bookId)
       .get()
@@ -117,7 +129,6 @@ export default class TransactionScreen extends Component {
   }
 
   getStudentDetails = (studentId) => {
-    studentId = studentId.trim()
     db.collection("students")
       .where("student_id", "==", studentId)
       .get()
@@ -191,6 +202,94 @@ export default class TransactionScreen extends Component {
     })
   }
 
+  checkBookAvailability = async (bookId) => {
+    var bookRef = await db.collection("books")
+      .where("book_id", "==", bookId)
+      .get()
+    var transaction_type = ""
+
+    if (bookRef.docs.length == 0) {
+      transaction_type = false
+    } else {
+      bookRef.docs.map(doc => {
+        transaction_type = doc.data().is_book_available ? "issue" : 'return'
+      })
+
+    }
+    return transaction_type
+
+  }
+
+  checkStudentEligibilityForBookIssue = async (studentId) => {
+    var studentRef = await db.collection("students")
+      .where("student_id", "==", studentId)
+      .get()
+    var isStudentEligible = ""
+
+    if (studentRef.docs.length == 0) {
+      if (Platform.OS == "android") {
+        ToastAndroid.show("Hmmmm...Aluno não encontrado!", ToastAndroid.SHORT)
+      }
+      else {
+        Alert.alert("Hmmmm...Aluno não encontrado!")
+      }
+      this.setState({
+        bookId: "",
+        studentId: ""
+      })
+    } else {
+      studentRef.docs.map(doc => {
+        if (doc.data().number_of_books_issued < 2) {
+          isStudentEligible = true
+        } else {
+          isStudentEligible = false
+          if (Platform.OS == "android") {
+            ToastAndroid.show("Opa! Este Aluno retirou mais de 2 livros!", ToastAndroid.SHORT)
+          }
+          else {
+            Alert.alert("Opa! Este Aluno retirou mais de 2 livros!")
+          }
+          this.setState({
+            bookId: "",
+            studentId: ""
+          })
+        }
+
+      })
+
+    }
+    return isStudentEligible
+
+  }
+
+  checkStudentEligibilityForBookReturn = async (bookId, studentId) => {
+    const transactionRef = await db
+      .collection("transactions")
+      .where("book_id", "==", bookId)
+      .limit(1)
+      .get();
+    var isStudentEligible = "";
+    transactionRef.docs.map(doc => {
+      var lastBookTransaction = doc.data();
+      if (lastBookTransaction.student_id === studentId) {
+        isStudentEligible = true;
+      } else {
+        isStudentEligible = false;
+        if (Platform.OS == "android") {
+          ToastAndroid.show("Ei amigo! Este aluno não retirou este livro!", ToastAndroid.SHORT)
+        }
+        else {
+          Alert.alert("Ei amigo! Este aluno não retirou este livro!")
+        }
+        this.setState({
+          bookId: "",
+          studentId: ""
+        });
+      }
+    });
+    return isStudentEligible;
+  };
+
   render() {
     const { bookId, studentId, domState, scanned } = this.state;
     if (domState !== "normal") {
@@ -215,8 +314,8 @@ export default class TransactionScreen extends Component {
                 placeholder={"ID do Livro"}
                 placeholderTextColor={"#FFFFFF"}
                 value={bookId}
-                onChangeText = {text => {
-                  this.setState({bookId: text})
+                onChangeText={text => {
+                  this.setState({ bookId: text })
                 }}
               />
               <TouchableOpacity
@@ -232,10 +331,10 @@ export default class TransactionScreen extends Component {
                 placeholder={"ID do Estudante"}
                 placeholderTextColor={"#FFFFFF"}
                 value={studentId}
-                onChangeText = {text => {
-                  this.setState({studentId: text})
+                onChangeText={text => {
+                  this.setState({ studentId: text })
                 }}
-             />
+              />
               <TouchableOpacity
                 style={styles.scanbutton}
                 onPress={() => this.getCameraPermissions("studentId")}
